@@ -13,6 +13,16 @@ NUM_DECKS = 6
 SUITS = ['spades', 'hearts', 'clubs', 'diamonds']
 VALUES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10] # last three are JQK
 
+# there are a few things any player can do
+    # 0 hit (if possible)
+    # 1 stay
+    # 2 split (if applicable)
+    # 3 double (if applicable)
+ACTIONS = ['hit', 'stay', 'split', 'double']
+
+GOOD_REWARD_VALUE=1
+BAD_REWARD_VALUE=1
+
 class Card:
     def __init__(self, suit: str, value: int) -> None:
         assert(suit in SUITS)
@@ -146,9 +156,12 @@ def test_prepDeck():
 class Player:
     def __init__(self, name: str, chips: int) -> None:
         self._name = name
-        self.chips = chips
+        self.chips = chips or 1000000 # inf money for dealer
         self._hand = None
         self.states = {}
+
+        self.last_states = []
+
         self.last_state_key = ''
         self.last_state_action_index = 0
 
@@ -216,7 +229,11 @@ class Player:
     
     def last_action_good(self):
         if self.last_state_key:
-            self.states[self.last_state_key][self.last_state_action_index] += 1
+            self.states[self.last_state_key][self.last_state_action_index] += GOOD_REWARD_VALUE
+
+    def last_action_bad(self):
+        if self.last_state_key:
+            self.states[self.last_state_key][self.last_state_action_index] -= BAD_REWARD_VALUE
         
 def test_player_q_action():
     p1 = Player('danny', 1000)
@@ -274,6 +291,35 @@ def test_tableSetup():
     t.deal()
     t.print_table_state()
 
+def test_table_round():
+    dealer = Player('dealer', None)
+    p1 = Player('danny', 1000)
+    d = Deck()
+    d.shuffle()
+
+    dealer_showing_card = d.next()
+    dealer.be_dealt(dealer_showing_card, d.next())
+    p1.be_dealt(d.next(), d.next())
+
+    # or prompt it
+    action = ACTIONS[p1.pick_q_action(dealer_showing_card)]
+    print (action)
+    while (action != 'stay'):
+        if action == 'hit':
+            p1.get_one_more_card(d.next())
+            if p1.hand().getSum() > 21:
+                # bust, call it bad
+                p1.last_action_bad()
+
+            action = ACTIONS[p1.pick_q_action(dealer_showing_card)]
+            print (action)
+
+    # p1.last_action_good()
+
+
+    # for i in range(10):
+    print(json.dumps(p1.get_q_states(), indent=3))
+
 
 # set of all possible states, with all possible choices at each one and values for each
 
@@ -285,4 +331,5 @@ if __name__ == '__main__':
     # test_tableSetup()
     # test_isBlackjack()
     # test_player_q_action()
-    test_view_player_q_action_states()
+    # test_view_player_q_action_states()
+    test_table_round()
