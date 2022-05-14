@@ -31,7 +31,8 @@ class Card:
         self.value = value
     
     def __str__(self) -> str:
-        return f'{self.value} of {self.suit}'
+        # return f'{self.value} of {self.suit}'
+        return f'{self.value}'
 
 class Hand:
     def __init__(self, cards: List[Card]) -> None:
@@ -54,20 +55,36 @@ class Hand:
         if not self.cards or len(self.cards) == 0:
             return 0
 
-        # todo, fix use case where A,A,6 returns hard, when it should
-        # be soft, use new sort() feature to tally A's at the beginning
         sum = 0
         isHard = True
+        containsAtLeastOneAce = False
         for x in self.cards:
+            # print(sum)
             # if it's an ace, check to see if its hard
             if x.value == 1:
-                if sum + 11 < 21:
-                    isHard = False
-                    sum += 11
-                else:
+                if containsAtLeastOneAce:
+                    # there can only be at most one ace that's hard
+                    # the first one seen (if previously) could still be reduced if we overflow, if we can (i.e. if notisHard)
+                    # we can only ever add one, but if needed, we should reduce the first one
                     sum += 1
+                    if sum > 21 and not isHard:
+                        sum -= 10 # remove the first ace, make it a 1
+                        isHard = True
+
+                else:
+                    # this is the first (or only) ace we see, check for 11 compatibility
+                    containsAtLeastOneAce = True
+                    if sum + 11 < 21:
+                        isHard = False
+                        sum += 11
+                    else:
+                        isHard = True # this one is technically redundant
+                        sum += 1
             else:
                 sum += x.value
+                if containsAtLeastOneAce and sum > 21 and not isHard:
+                    sum -= 10 # remove the first ace, make it a 1
+                    isHard = True
 
         return sum, isHard
     
@@ -86,9 +103,21 @@ def test_getSum():
     c3 = Card('spades', 6)
     h = Hand([c1, c2, c3])
 
-    print(h, 'sum:', h.getSum())
-    assert(h.getSum()[0] == 18)
-    assert(h.getSum()[1] == False)
+    sum, isHard = h.getSum()
+    print(h, 'sum:', sum, 'hard' if isHard else 'soft')
+    assert(sum == 18)
+    assert(isHard == False)
+
+    c1 = Card('spades', 1)
+    c2 = Card('hearts', 1)
+    c3 = Card('diamonds', 10)
+    c4 = Card('clubs', 1)
+    h = Hand([c1, c2, c3, c4])
+
+    sum, isHard = h.getSum()
+    print(h, 'sum:', sum, 'hard' if isHard else 'soft')
+    assert(sum == 13)
+    assert(isHard == True)
 
 def test_sortHand():
     c1 = Card('diamonds', 5)
@@ -327,6 +356,7 @@ def test_table_round():
             # bust, call it bad
             p1.last_action_bad()
             print (p1.name(), action, p1_sum, p1.hand())
+            # busted!
             print(p1.name(), 'BUST!')
             break
 
@@ -346,7 +376,7 @@ def test_table_round():
     # loop through players and determine their individual winnings (unless global push applies)
     if dealer_sum > 22:
         # dealer loses, everyone wins
-        print('dealer lost hand')
+        print('dealer lost hand, everyone wins')
         pass
     elif dealer_sum == 22:
         # everyone push
@@ -354,20 +384,20 @@ def test_table_round():
         pass
     else:
         # determine individual win or not
-        if dealer_sum > p1_sum:
+        if p1_sum > 21:
+            print(p1.name(), 'busted')
+        elif dealer_sum > p1_sum:
             print(dealer.name(), 'beats', p1.name())
         elif p1_sum > dealer_sum:
-            print(p1.name(), 'beats', dealer.name())
+            if p1.hand().isBlackJack():
+                print(p1.name(), 'got blackjack')
+            else:
+                print(p1.name(), 'beats', dealer.name())
         else:
             print(p1.name(), 'pushes individually')
 
-
-
-
-
     # determine wins
     # p1.last_action_good()
-
 
     # for i in range(10):
     print(json.dumps(p1.get_q_states(), indent=3))
