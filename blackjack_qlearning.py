@@ -292,28 +292,80 @@ def test_tableSetup():
     t.print_table_state()
 
 def test_table_round():
+    # init the players and dealer and deck
     dealer = Player('dealer', None)
     p1 = Player('danny', 1000)
     d = Deck()
     d.shuffle()
 
+    # deal to everyone (just straight up, RR not important)
     dealer_showing_card = d.next()
     dealer.be_dealt(dealer_showing_card, d.next())
     p1.be_dealt(d.next(), d.next())
 
-    # or prompt it
+    # main loop for a single player, do this for all players in future
     action = ACTIONS[p1.pick_q_action(dealer_showing_card)]
-    print (action)
+    p1_sum, _ = p1.hand().getSum()
+    print (p1.name(), action, p1_sum, p1.hand())
     while (action != 'stay'):
+
+        # if action is hit
         if action == 'hit':
             p1.get_one_more_card(d.next())
-            if p1.hand().getSum() > 21:
-                # bust, call it bad
-                p1.last_action_bad()
+            p1_sum, _ = p1.hand().getSum()
 
-            action = ACTIONS[p1.pick_q_action(dealer_showing_card)]
-            print (action)
+        # todo: if action is double
+        if action == 'double':
+            pass
 
+        # todo: if action is split
+        if action == 'split':
+            pass
+
+        # if i bust, call it out and stop
+        if p1_sum > 21:
+            # bust, call it bad
+            p1.last_action_bad()
+            print (p1.name(), action, p1_sum, p1.hand())
+            print(p1.name(), 'BUST!')
+            break
+
+        action = ACTIONS[p1.pick_q_action(dealer_showing_card)]
+        print (p1.name(), action, p1_sum, p1.hand())
+
+    # do the mandatory loop for the dealer
+    # dealer must hit on soft 17, pushes on 22
+    dealer_sum, dealer_sum_is_hard = dealer.hand().getSum()
+    print (dealer.name(), dealer_sum, dealer.hand())
+    # todo, fix this logic
+    while ((dealer_sum < 16 and dealer_sum_is_hard) or (dealer_sum < 17 and not dealer_sum_is_hard)):
+        dealer.get_one_more_card(d.next())
+        dealer_sum, dealer_sum_is_hard = dealer.hand().getSum()
+        print (dealer.name(), dealer_sum, dealer.hand())
+
+    # loop through players and determine their individual winnings (unless global push applies)
+    if dealer_sum > 22:
+        # dealer loses, everyone wins
+        print('dealer lost hand')
+        pass
+    elif dealer_sum == 22:
+        # everyone push
+        print('everyone pushes')
+        pass
+    else:
+        # determine individual win or not
+        if dealer_sum > p1_sum:
+            print(dealer.name(), 'beats', p1.name())
+        elif p1_sum > dealer_sum:
+            print(p1.name(), 'beats', dealer.name())
+        else:
+            print(p1.name(), 'pushes individually')
+
+
+
+
+
+    # determine wins
     # p1.last_action_good()
 
 
