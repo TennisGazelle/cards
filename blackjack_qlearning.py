@@ -23,6 +23,8 @@ ACTIONS = ['hit', 'stay', 'split', 'double']
 GOOD_REWARD_VALUE=1
 BAD_REWARD_VALUE=1
 
+INCLUDE_DEALER_IN_Q_STATE=True
+
 class Card:
     def __init__(self, suit: str, value: int) -> None:
         assert(suit in SUITS)
@@ -213,18 +215,21 @@ class Player:
     def get_q_states(self):
         return self.states
 
-    def pick_q_action(self, dealerCard: Card) -> int: # just numbers 1,2,3,4
+    def pick_and_stage_q_action(self, dealerCard: Card) -> int: # just numbers 1,2,3,4
         # there are a few things any player can do
             # 0 hit (if possible)
             # 1 stay
             # 2 split (if applicable)
             # 3 double (if applicable)
+        # represented by 4 float probability vector N within (0,1)^4
         # they will be kept as Q-states in an array with probability vectors for each of them
-        # the 'action' will be the one that was made, small memory kept
-        # if action is good (tbd after this method), memory updated for probability vector
+        # the 'action' will be the one that was made, small cache of sequences are kept in memory
+        # if action is good/bad (tbd after this method), memory updated for probability vector
 
         # is this 'state' in q-table
-        key = str(dealerCard) + '-' + str(self._hand.sort())
+        key = str(self._hand.sort())
+        if INCLUDE_DEALER_IN_Q_STATE:
+            key = str(dealerCard) + '-' + key
         if key not in self.states.keys():
             # initialize it, and make it all vectors possible
             self.states[key] = [1, 1, 1, 1]
@@ -249,7 +254,7 @@ class Player:
         # convert token vector to probability vector
         tokenVectorSum = sum(tokenVector)
         probabilityVector = [float(v)/float(tokenVectorSum) for v in tokenVector]
-        shot = random.uniform(0, 1)
+        shot = random.uniform(0, 1) # roll the die
         index = 0
         while shot > 0 and index < len(probabilityVector):
             shot -= probabilityVector[index]
@@ -257,29 +262,35 @@ class Player:
         self.last_state_action_index = index-1
 
         # save this key in most recent actions
-        self.last_states[key] = [0, 0, 0, 0]
-        self.last_states[key][self.last_state_action_index] += 1
+        self.last_states[key] = self.last_state_action_index
 
         return self.last_state_action_index
     
     def last_action_good(self):
         # go through the other keys, and add that vector to the q vector
-
-        if self.last_state_key:
-            self.states[self.last_state_key][self.last_state_action_index] += GOOD_REWARD_VALUE
+        for key in self.last_states.keys():
+            if key not in self.states.keys():
+                self.states[key] = [0, 0, 0, 0]
+            self.states[key][self.last_states[key]] += GOOD_REWARD_VALUE
+        self.flush_last_states()
 
     def last_action_bad(self):
         # go through the other keys, and add that vector to the q vector
+        for key in self.last_states.keys():
+            if key not in self.states.keys():
+                self.states[key] = [0, 0, 0, 0]
+            self.states[key][self.last_states[key]] -= BAD_REWARD_VALUE
+        self.flush_last_states()
 
-        if self.last_state_key:
-            self.states[self.last_state_key][self.last_state_action_index] -= BAD_REWARD_VALUE
+    def flush_last_states(self):
+        self.last_states.clear()
         
 def test_player_q_action():
     p1 = Player('danny', 1000)
     c1, c2, c3 = Card('spades', 1), Card('hearts', 5), Card('diamonds', 8)
     p1.be_dealt(c1, c2)
     print(p1)
-    print('action', p1.pick_q_action(c3))
+    print('action', p1.pick_and_stage_q_action(c3))
 
 def test_view_player_q_action_states():
     p1 = Player('danny', 1000)
@@ -289,7 +300,7 @@ def test_view_player_q_action_states():
     for i in range(1000):
         dealer_card = d.next()
         p1.be_dealt(d.next(), d.next())
-        p1.pick_q_action(dealer_card)
+        p1.pick_and_stage_q_action(dealer_card)
         p1.last_action_good()
     
     print(json.dumps(p1.get_q_states(), indent=3))
@@ -322,6 +333,8 @@ class Table:
         for p in self.players:
             p.be_dealt(self.deck.next(), self.deck.next())
 
+    
+
 
 def test_tableSetup():
     t = Table(3)
@@ -329,6 +342,9 @@ def test_tableSetup():
 
     t.deal()
     t.print_table_state()
+
+# def test_parameterized_round():
+
 
 def test_table_round():
     # init the players and dealer and deck
@@ -343,7 +359,7 @@ def test_table_round():
     p1.be_dealt(d.next(), d.next())
 
     # main loop for a single player, do this for all players in future
-    action = ACTIONS[p1.pick_q_action(dealer_showing_card)]
+    action = ACTIONS[p1.pick_and_stage_q_action(dealer_showing_card)]
     p1_sum, _ = p1.hand().getSum()
     print (p1.name(), action, p1_sum, p1.hand())
     while (action != 'stay'):
@@ -370,7 +386,7 @@ def test_table_round():
             print(p1.name(), 'BUST!')
             break
 
-        action = ACTIONS[p1.pick_q_action(dealer_showing_card)]
+        action = ACTIONS[p1.pick_and_stage_q_action(dealer_showing_card)]
         print (p1.name(), action, p1_sum, p1.hand())
 
     # do the mandatory loop for the dealer
@@ -399,11 +415,14 @@ def test_table_round():
             p1.last_action_bad()
         elif dealer_sum > p1_sum:
             print(dealer.name(), 'beats', p1.name())
+            p1.last_action_bad()
         elif p1_sum > dealer_sum:
             if p1.hand().isBlackJack():
                 print(p1.name(), 'got blackjack')
+                p1.last_action_good()
             else:
                 print(p1.name(), 'beats', dealer.name())
+                p1.last_action_good()
         else:
             print(p1.name(), 'pushes individually')
 
