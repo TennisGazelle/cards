@@ -1,5 +1,5 @@
 #!/usr/lib/python3
-
+import os
 import copy
 import json
 from random import randint
@@ -21,9 +21,9 @@ VALUES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10] # last three are JQK
 ACTIONS = ['hit', 'stay', 'split', 'double']
 
 GOOD_REWARD_VALUE=1
-BAD_REWARD_VALUE=1
+BAD_REWARD_VALUE=5
 
-INCLUDE_DEALER_IN_Q_STATE=True
+INCLUDE_DEALER_IN_Q_STATE=False
 
 class Card:
     def __init__(self, suit: str, value: int) -> None:
@@ -186,7 +186,7 @@ def test_prepDeck():
 
 class Player:
     def __init__(self, name: str, chips: int) -> None:
-        self._name = name
+        self.playerName = name
         self.chips = chips or 1000000 # inf money for dealer
         self._hand = None
         self.states = {}
@@ -202,12 +202,27 @@ class Player:
     def hand(self) -> Hand:
         return self._hand
 
-    def name(self):
-        return self._name
-    
+    def getName(self):
+        return self.playerName
+
+    def as_filename(self):
+        return f'player_data/{self.getName()}.json'
+
+    def load_states_from_file(self):
+        if os.path.exists(self.as_filename()):
+            with open(self.as_filename(), 'r') as player_file:
+                self.states = json.loads(player_file.read() or '{}')
+                player_file.close()
+
+    def save_states(self):
+        with open(self.as_filename(), 'w+') as player_file:
+            player_file.write(json.dumps(self.states))
+            player_file.close()
+        print('saved to', player_file.name)
+
     def be_dealt(self, c1: Card, c2: Card):
         self._hand = Hand([c1, c2])
-        self.last_states = {}
+        self.last_states.clear()
     
     def hit(self, c):
         self._hand.add_card(c)
@@ -232,7 +247,7 @@ class Player:
             key = str(dealerCard) + '-' + key
         if key not in self.states.keys():
             # initialize it, and make it all vectors possible
-            self.states[key] = [1, 1, 1, 1]
+            self.states[key] = [100, 100, 100, 100]
 
         # shallow copy to keep track of updates
         tokenVector = self.states[key]
@@ -252,7 +267,7 @@ class Player:
             tokenVector[3] = 0
         
         # convert token vector to probability vector
-        tokenVectorSum = sum(tokenVector)
+        tokenVectorSum = max(sum(tokenVector), 1)
         probabilityVector = [float(v)/float(tokenVectorSum) for v in tokenVector]
         shot = random.uniform(0, 1) # roll the die
         index = 0
@@ -269,16 +284,16 @@ class Player:
     def last_action_good(self):
         # go through the other keys, and add that vector to the q vector
         for key in self.last_states.keys():
-            if key not in self.states.keys():
-                self.states[key] = [0, 0, 0, 0]
+            # if key not in self.states.keys():
+            #     self.states[key] = [0, 0, 0, 0]
             self.states[key][self.last_states[key]] += GOOD_REWARD_VALUE
         self.flush_last_states()
 
     def last_action_bad(self):
         # go through the other keys, and add that vector to the q vector
         for key in self.last_states.keys():
-            if key not in self.states.keys():
-                self.states[key] = [0, 0, 0, 0]
+            # if key not in self.states.keys():
+            #     self.states[key] = [0, 0, 0, 0]
             self.states[key][self.last_states[key]] -= BAD_REWARD_VALUE
         self.flush_last_states()
 
@@ -321,7 +336,7 @@ class Table:
             0 if self.dealer.hand() == None else self.dealer.hand().getSum())
         for p in self.players:
             print(
-                f'Player {p.name()}:',
+                f'Player {p.getName()}:',
                 None if not p.hand() else p.hand(),
                 0 if p.hand() == None else p.hand().getSum())
 
@@ -353,83 +368,125 @@ def test_table_round():
     d = Deck()
     d.shuffle()
 
-    # deal to everyone (just straight up, RR not important)
-    dealer_showing_card = d.next()
-    dealer.be_dealt(dealer_showing_card, d.next())
-    p1.be_dealt(d.next(), d.next())
+    # for the table to have scope into multiple hands a user
+    # might choose to make (potential new q state on what to do)
+    # all players minimum have one 'table' hand which is shared
+    # between dealer and them
 
-    # main loop for a single player, do this for all players in future
-    action = ACTIONS[p1.pick_and_stage_q_action(dealer_showing_card)]
-    p1_sum, _ = p1.hand().getSum()
-    print (p1.name(), action, p1_sum, p1.hand())
-    while (action != 'stay'):
+    # eventually the player will hold an array of 'hands' that
+    # can be shared with the table for part ownership (i.e. minimum bets validated,
+    # free bet or other conditions apply for side bets, etc)
 
-        # if action is hit
-        if action == 'hit':
-            p1.hit(d.next())
-            p1_sum, _ = p1.hand().getSum()
+    # this round must iterate per hand, per player on table
 
-        # todo: if action is double
-        if action == 'double':
-            pass
 
-        # todo: if action is split
-        if action == 'split':
-            pass
 
-        # if i bust, call it out and stop
-        if p1_sum > 21:
-            # bust, call it bad
-            p1.last_action_bad()
-            print (p1.name(), action, p1_sum, p1.hand())
-            # busted!
-            print(p1.name(), 'BUST!')
-            break
+    # cache for now, remove later
+    ##
+    ## start removal
+    ##
+
+    p1.load_states_from_file()
+
+    ##
+    ## end removal
+    ##
+
+    for round_index in range(1000):
+        # deal to everyone (just straight up, RR not important)
+        dealer_showing_card = d.next()
+        dealer.be_dealt(dealer_showing_card, d.next())
+        p1.be_dealt(d.next(), d.next())
+
+        # main loop for a single player, do this for all players in future
+        ## start loop ##
 
         action = ACTIONS[p1.pick_and_stage_q_action(dealer_showing_card)]
-        print (p1.name(), action, p1_sum, p1.hand())
+        p1_sum, _ = p1.hand().getSum()
+        print (p1.getName(), action, p1_sum, p1.getName())
+        while (action != 'stay'):
 
-    # do the mandatory loop for the dealer
-    # dealer must hit on soft 17, pushes on 22
-    dealer_sum, dealer_sum_is_hard = dealer.hand().getSum()
-    print (dealer.name(), dealer_sum, dealer.hand())
-    # todo, fix this logic
-    while ((dealer_sum < 16 and dealer_sum_is_hard) or (dealer_sum < 17 and not dealer_sum_is_hard)):
-        dealer.hit(d.next())
+            # if action is hit
+            if action == 'hit':
+                p1.hit(d.next())
+                p1_sum, _ = p1.hand().getSum()
+
+            # todo: if action is double
+            if action == 'double':
+                p1.hit(d.next())
+                p1_sum, _ = p1.hand().getSum()
+                action = 'stay'
+                continue
+
+            # todo: if action is split, make temp second hand for player
+            if action == 'split':
+                # interpreting 'splitting' as staying for now, skip
+                action = 'stay'
+                continue
+
+            # if i bust, call it out and stop
+            if p1_sum > 21:
+                # bust, call it bad
+                p1.last_action_bad()
+                print (p1.getName(), action, p1_sum, p1.hand())
+                # busted!
+                print(p1.getName(), 'BUST!')
+                break
+
+            action = ACTIONS[p1.pick_and_stage_q_action(dealer_showing_card)]
+            print (p1.getName(), action, p1_sum, p1.hand())
+
+        # do the mandatory loop for the dealer
+        # dealer must hit on soft 17, pushes on 22
         dealer_sum, dealer_sum_is_hard = dealer.hand().getSum()
-        print (dealer.name(), dealer_sum, dealer.hand())
+        print (dealer.getName(), dealer_sum, dealer.hand())
+        # todo, fix this logic
+        while ((dealer_sum < 16 and dealer_sum_is_hard) or (dealer_sum < 17 and not dealer_sum_is_hard)):
+            dealer.hit(d.next())
+            dealer_sum, dealer_sum_is_hard = dealer.hand().getSum()
+            print (dealer.getName(), dealer_sum, dealer.hand())
 
-    # loop through players and determine their individual winnings (unless global push applies)
-    if dealer_sum > 22:
-        # dealer loses, everyone wins
-        print('dealer lost hand, everyone wins')
-        pass
-    elif dealer_sum == 22:
-        # everyone push
-        print('everyone pushes')
-        pass
-    else:
-        # determine individual win or not
-        if p1_sum > 21:
-            print(p1.name(), 'busted')
-            p1.last_action_bad()
-        elif dealer_sum > p1_sum:
-            print(dealer.name(), 'beats', p1.name())
-            p1.last_action_bad()
-        elif p1_sum > dealer_sum:
-            if p1.hand().isBlackJack():
-                print(p1.name(), 'got blackjack')
-                p1.last_action_good()
-            else:
-                print(p1.name(), 'beats', dealer.name())
-                p1.last_action_good()
+        # loop through players and determine their individual winnings (unless global push applies)
+        if dealer_sum > 22:
+            # dealer loses, everyone wins
+            print('dealer lost hand, everyone wins')
+            pass
+        elif dealer_sum == 22:
+            # everyone push
+            print('everyone pushes')
+            pass
         else:
-            print(p1.name(), 'pushes individually')
+            # determine individual win or not
+            if p1_sum > 21:
+                print(p1.getName(), 'busted')
+                p1.last_action_bad()
+            elif dealer_sum > p1_sum:
+                print(dealer.getName(), 'beats', p1.getName())
+                p1.last_action_bad()
+            elif p1_sum > dealer_sum:
+                if p1.hand().isBlackJack():
+                    print(p1.getName(), 'got blackjack')
+                    p1.last_action_good()
+                else:
+                    print(p1.getName(), 'beats', dealer.getName())
+                    p1.last_action_good()
+            else:
+                print(p1.getName(), 'pushes individually')
+        ## end player loop ##
 
-    # determine wins
-    # p1.last_action_good()
+        
 
-    # for i in range(10):
+    # cache for now, remove later
+    ##
+    ## start removal
+    ##
+
+    p1.save_states()
+
+    ##
+    ## end removal
+    ##
+
     print(json.dumps(p1.get_q_states(), indent=3))
 
 
