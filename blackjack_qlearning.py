@@ -189,7 +189,7 @@ class Player:
         self._hand = None
         self.states = {}
 
-        self.last_states = []
+        self.last_states = {}
 
         self.last_state_key = ''
         self.last_state_action_index = 0
@@ -205,8 +205,9 @@ class Player:
     
     def be_dealt(self, c1: Card, c2: Card):
         self._hand = Hand([c1, c2])
+        self.last_states = {}
     
-    def get_one_more_card(self, c):
+    def hit(self, c):
         self._hand.add_card(c)
     
     def get_q_states(self):
@@ -254,13 +255,22 @@ class Player:
             shot -= probabilityVector[index]
             index += 1
         self.last_state_action_index = index-1
-        return index-1
+
+        # save this key in most recent actions
+        self.last_states[key] = [0, 0, 0, 0]
+        self.last_states[key][self.last_state_action_index] += 1
+
+        return self.last_state_action_index
     
     def last_action_good(self):
+        # go through the other keys, and add that vector to the q vector
+
         if self.last_state_key:
             self.states[self.last_state_key][self.last_state_action_index] += GOOD_REWARD_VALUE
 
     def last_action_bad(self):
+        # go through the other keys, and add that vector to the q vector
+
         if self.last_state_key:
             self.states[self.last_state_key][self.last_state_action_index] -= BAD_REWARD_VALUE
         
@@ -288,9 +298,9 @@ def test_view_player_q_action_states():
 class Table:
     def __init__(self, numPlayers: int) -> None:
         self.dealer = Player('dealer', 1000000) # inf money
-        self.players = [Player(n, 100) for n in ('Danny', 'Honi', 'Sierra')]
+        self.players = [Player(n, 100) for n in ('Danny', 'Honi', 'Sierra', 'Oliver', 'Alex', 'Kathir', 'Ben')]
         self.rounds = []
-        self.current_round = None
+        self.current_round = {}
         self.deck = Deck()
 
     def print_table_state(self):
@@ -340,7 +350,7 @@ def test_table_round():
 
         # if action is hit
         if action == 'hit':
-            p1.get_one_more_card(d.next())
+            p1.hit(d.next())
             p1_sum, _ = p1.hand().getSum()
 
         # todo: if action is double
@@ -369,7 +379,7 @@ def test_table_round():
     print (dealer.name(), dealer_sum, dealer.hand())
     # todo, fix this logic
     while ((dealer_sum < 16 and dealer_sum_is_hard) or (dealer_sum < 17 and not dealer_sum_is_hard)):
-        dealer.get_one_more_card(d.next())
+        dealer.hit(d.next())
         dealer_sum, dealer_sum_is_hard = dealer.hand().getSum()
         print (dealer.name(), dealer_sum, dealer.hand())
 
@@ -386,6 +396,7 @@ def test_table_round():
         # determine individual win or not
         if p1_sum > 21:
             print(p1.name(), 'busted')
+            p1.last_action_bad()
         elif dealer_sum > p1_sum:
             print(dealer.name(), 'beats', p1.name())
         elif p1_sum > dealer_sum:
