@@ -18,12 +18,19 @@ VALUES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10] # last three are JQK
 ACTIONS = ['hit', 'stay', 'split', 'double']
 
 GOOD_REWARD_VALUE=1
-BAD_REWARD_VALUE=1
+BAD_REWARD_VALUE=5
 
-INCLUDE_DEALER_IN_Q_STATE=False
+INCLUDE_DEALER_IN_Q_STATE=True
+
+DEFAULT_VECTOR = [10, 10, 10, 10]
 
 PLAYER_NAME_CHOICES = ['daniel', 'honi', 'sierra', 'oliver', 'alex', 'kathir', 'ben']
 DEALER_NAME_CHOICES = ['Dealer-Pable', 'Dealer-Liz', 'Dealer-Mina']
+
+TableRoundStates = {
+    'INACTIVE_WAITING': 'inactive_waiting',
+    'ACTIVE_DEAL': 'active_deal'
+}
 
 class Card:
     def __init__(self, suit: str, value: int) -> None:
@@ -197,6 +204,12 @@ class Player:
         self.last_state_key = ''
         self.last_state_action_index = 0
 
+        self.score = {
+            'wins': 0,
+            'losses': 0
+        }
+        self.hands_seen = 0
+
     def __str__(self) -> str:
         return f'{self._name}-${self.chips}-{self._hand}'
     
@@ -209,21 +222,31 @@ class Player:
     def as_filename(self):
         return f'player_data/{self.getName()}.json'
 
+    def get_metadata(self) -> dict:
+        return { 'score': self.score, 'num_states': len(self.states.keys()), 'hands_seen': self.hands_seen }
+
     def load_states_from_file(self):
         if os.path.exists(self.as_filename()):
             with open(self.as_filename(), 'r') as player_file:
                 self.states = json.loads(player_file.read() or '{}')
                 player_file.close()
 
+            if 'metadata' in self.states.keys():
+                self.score = self.states['metadata']['score']
+                self.hands_seen = self.states['metadata']['hands_seen']
+
     def save_states(self):
         with open(self.as_filename(), 'w+') as player_file:
-            player_file.write(json.dumps(self.states, sort_keys=True, indent=3))
+            payload = self.states.copy()
+            payload['metadata'] = self.get_metadata()
+            player_file.write(json.dumps(payload, sort_keys=True, indent=3))
             player_file.close()
         print('saved to', player_file.name)
 
     def be_dealt(self, c1: Card, c2: Card):
         self._hand = Hand([c1, c2])
         self.last_states.clear()
+        self.hands_seen += 1
     
     def hit(self, c):
         self._hand.add_card(c)
@@ -244,8 +267,7 @@ class Player:
     @staticmethod
     def generate_dealer(name: str = '', chips: int = 1000000):
         if name == '':
-            name_choices = ['FancyDealerName', 'Liz']
-            name = name_choices[randint(0, len(name_choices)-1)]
+            name = DEALER_NAME_CHOICES[randint(0, len(DEALER_NAME_CHOICES)-1)]
         return Player(name, chips, True)
 
     def get_showing_card(self) -> Card or None:
@@ -253,7 +275,16 @@ class Player:
             return self._hand.get(0)
         else:
             return None
-            
+
+    def generate_state_key(self, dealerCard: Card) -> str:
+        # sum, is_hard = self._hand.getSum()
+        # key = str(sum) + '-hard' if is_hard else '-soft'
+
+        key = str(self._hand.sort())
+        if INCLUDE_DEALER_IN_Q_STATE:
+            key = str(dealerCard) + '-' + key
+        return key
+
 
     def pick_and_stage_q_action(self, dealerCard: Card) -> int: # just numbers 1,2,3,4
         # there are a few things any player can do
@@ -267,12 +298,19 @@ class Player:
         # if action is good/bad (tbd after this method), memory updated for probability vector
 
         # is this 'state' in q-table
-        key = str(self._hand.sort())
-        if INCLUDE_DEALER_IN_Q_STATE:
-            key = str(dealerCard) + '-' + key
+        key = self.generate_state_key(dealerCard)
         if key not in self.states.keys():
+            # if it's a valid state (i.e. not yet busted)
+            player_sum, _ = self._hand.getSum()
+            if player_sum > 21:
+                self.last_state_action_index = 1
+                return 1 # stay
             # initialize it, and make it all vectors possible
-            self.states[key] = [100, 100, 100, 100]
+            self.states[key] = DEFAULT_VECTOR
+
+        # blackjacks are automatic stays
+        if self._hand.isBlackJack():
+            return 1 # stay
 
         # shallow copy to keep track of updates
         tokenVector = self.states[key]
@@ -307,6 +345,8 @@ class Player:
         return self.last_state_action_index
     
     def last_action_good(self):
+        self.score['wins'] += 1
+        self.hands_seen += 1
         # go through the other keys, and add that vector to the q vector
         for key in self.last_states.keys():
             # if key not in self.states.keys():
@@ -315,11 +355,15 @@ class Player:
         self.flush_last_states()
 
     def last_action_bad(self):
+        self.score['losses'] += 1
         # go through the other keys, and add that vector to the q vector
         for key in self.last_states.keys():
             # if key not in self.states.keys():
             #     self.states[key] = [0, 0, 0, 0]
             self.states[key][self.last_states[key]] -= BAD_REWARD_VALUE
+        self.flush_last_states()
+
+    def last_action_neutral(self):
         self.flush_last_states()
 
     def flush_last_states(self):
@@ -344,11 +388,6 @@ def test_view_player_q_action_states():
         p1.last_action_good()
     
     print(json.dumps(p1.get_q_states(), indent=3))
-
-TableRoundStates = {
-    'INACTIVE_WAITING': 'inactive_waiting',
-    'ACTIVE_DEAL': 'active_deal'
-}
 
 class Table:
     def __init__(self, num_players: int = 0) -> None:
@@ -429,7 +468,7 @@ class Table:
         print (self.dealer.getName(), dealer_sum, self.dealer.hand())
         # # todo, fix this logic
         while ((dealer_sum < 16 and dealer_sum_is_hard) or (dealer_sum < 17 and not dealer_sum_is_hard)):
-            self.dealer.hit(self.dealer.next())
+            self.dealer.hit(self.deck.next())
             dealer_sum, dealer_sum_is_hard = self.dealer.hand().getSum()
             print (self.dealer.getName(), dealer_sum, self.dealer.hand())
         return dealer_sum
@@ -460,7 +499,12 @@ class Table:
                     print(active_player.getName(), 'beats', self.dealer.getName())
                     active_player.last_action_good()
             else:
-                print(active_player.getName(), 'pushes individually')        
+                print(active_player.getName(), 'pushes individually')
+                active_player.last_action_neutral()
+
+        # active_player.save_states()
+        # print('q states:', len(active_player.get_q_states().keys()))
+     
 
     ## main round robin function
     def complete_a_round(self):
@@ -469,7 +513,7 @@ class Table:
             # active_deal - bets locked in, players have been dealt
         self.round_status = TableRoundStates['ACTIVE_DEAL']
         self.deal()
-        self.print_table_state()
+        # self.print_table_state()
 
         # todo: check for ace or 10, if ace, ask for insurance and if 10 early check for blackjack
 
@@ -654,8 +698,46 @@ if __name__ == '__main__':
     # test_table_round()
 
     table = Table()
-    p1 = Player('p1', 1000)
-    p2 = Player('p2', 1000)
+    p1 = Player('test_danny', 20000)
+    p1.load_states_from_file()
     table.add_player(p1)
-    table.add_player(p2)
-    table.complete_a_round()
+
+    wins, losses, win_rate, q_state_size = [], [], [], []
+    starting_index = p1.get_metadata()['hands_seen']
+    for i in range(1, 20000):
+        table.complete_a_round()
+        
+        metadata = p1.get_metadata()
+        wins.append(metadata['score']['wins'])
+        losses.append(metadata['score']['losses'])
+        win_rate.append(float(metadata['score']['wins']) / float(starting_index + i))
+        q_state_size.append(metadata['num_states'])
+
+        # print(wins, losses, q_state_size, metadata)
+
+    p1.save_states()
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    # Some example data to display
+    x = np.array(range(starting_index, starting_index + len(wins)))
+    y_wins = np.array(wins)
+    y_losses = np.array(losses)
+    y_rate = np.array(win_rate)
+    y_size = np.array(q_state_size)
+
+    # x = np.linspace(0, 2 * np.pi, 400)
+    # y = np.sin(x ** 2)
+
+    # print(x)
+    # print(y_wins)
+    # print(y_losses)
+    # print(y_size)
+
+    fig, axs = plt.subplots(4)
+    fig.suptitle('wins, losses, unique q states')
+    axs[0].plot(x, y_wins)
+    axs[1].plot(x, y_losses)
+    axs[2].plot(x, y_rate)
+    axs[3].plot(x, y_size)
+    plt.show()
