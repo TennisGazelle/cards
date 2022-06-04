@@ -4,10 +4,7 @@ import copy
 import json
 from random import randint
 import random
-from string import capwords
-from textwrap import indent
 from typing import List, Tuple
-from xmlrpc.client import Boolean
 
 NUM_DECKS = 6
 SUITS = ['spades', 'hearts', 'clubs', 'diamonds']
@@ -21,9 +18,12 @@ VALUES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10] # last three are JQK
 ACTIONS = ['hit', 'stay', 'split', 'double']
 
 GOOD_REWARD_VALUE=1
-BAD_REWARD_VALUE=5
+BAD_REWARD_VALUE=1
 
 INCLUDE_DEALER_IN_Q_STATE=False
+
+PLAYER_NAME_CHOICES = ['daniel', 'honi', 'sierra', 'oliver', 'alex', 'kathir', 'ben']
+DEALER_NAME_CHOICES = ['Dealer-Pable', 'Dealer-Liz', 'Dealer-Mina']
 
 class Card:
     def __init__(self, suit: str, value: int) -> None:
@@ -185,11 +185,12 @@ def test_prepDeck():
     print(d.next())
 
 class Player:
-    def __init__(self, name: str, chips: int) -> None:
+    def __init__(self, name: str, chips: int, is_dealer: bool = False) -> None:
         self.playerName = name
         self.chips = chips or 1000000 # inf money for dealer
         self._hand = None
         self.states = {}
+        self.is_dealer = is_dealer
 
         self.last_states = {}
 
@@ -216,7 +217,7 @@ class Player:
 
     def save_states(self):
         with open(self.as_filename(), 'w+') as player_file:
-            player_file.write(json.dumps(self.states))
+            player_file.write(json.dumps(self.states, sort_keys=True, indent=3))
             player_file.close()
         print('saved to', player_file.name)
 
@@ -229,6 +230,30 @@ class Player:
     
     def get_q_states(self):
         return self.states
+    
+    @staticmethod
+    def generate_player(name: str = ''):
+        if name == '':
+            name = PLAYER_NAME_CHOICES[randint(0, len(PLAYER_NAME_CHOICES)-1)]
+        return Player(name, 1000)
+
+    @staticmethod
+    def generate_players(num_players: int):
+        return [Player.generate_player() for _ in range(num_players)]
+
+    @staticmethod
+    def generate_dealer(name: str = '', chips: int = 1000000):
+        if name == '':
+            name_choices = ['FancyDealerName', 'Liz']
+            name = name_choices[randint(0, len(name_choices)-1)]
+        return Player(name, chips, True)
+
+    def get_showing_card(self) -> Card or None:
+        if self._hand:
+            return self._hand.get(0)
+        else:
+            return None
+            
 
     def pick_and_stage_q_action(self, dealerCard: Card) -> int: # just numbers 1,2,3,4
         # there are a few things any player can do
@@ -261,7 +286,7 @@ class Player:
             tokenVector[2] = 0
 
         # if i can double, consider index 3 in probability vector
-        if self._hand.size() == 2 and self._hand.getSum() in (9, 10, 11):
+        if self._hand.size() == 2:
             pass
         else:
             tokenVector[3] = 0
@@ -320,19 +345,28 @@ def test_view_player_q_action_states():
     
     print(json.dumps(p1.get_q_states(), indent=3))
 
+TableRoundStates = {
+    'INACTIVE_WAITING': 'inactive_waiting',
+    'ACTIVE_DEAL': 'active_deal'
+}
 
 class Table:
-    def __init__(self, numPlayers: int) -> None:
-        self.dealer = Player('dealer', 1000000) # inf money
-        self.players = [Player(n, 100) for n in ('Danny', 'Honi', 'Sierra', 'Oliver', 'Alex', 'Kathir', 'Ben')]
+    def __init__(self, num_players: int = 0) -> None:
+        self.dealer = Player.generate_dealer()
+        self.players = Player.generate_players(num_players)
         self.rounds = []
         self.current_round = {}
         self.deck = Deck()
 
+        # state machine
+            # inactive_waiting - no round happening, receiving bets
+            # active_deal - bets locked in, players have been dealt
+        self.round_status = TableRoundStates['INACTIVE_WAITING']
+
     def print_table_state(self):
         print(
             f'Dealer:', 
-            None if not self.dealer.hand() else f'{self.dealer.hand()}', 
+            'not yet dealt' if not self.dealer.hand() else f'{self.dealer.hand()}', 
             0 if self.dealer.hand() == None else self.dealer.hand().getSum())
         for p in self.players:
             print(
@@ -343,12 +377,126 @@ class Table:
     # start a round
     def deal(self):
         self.deck.reset()
+        self.deck.shuffle()
 
         self.dealer.be_dealt(self.deck.next(), self.deck.next())
         for p in self.players:
             p.be_dealt(self.deck.next(), self.deck.next())
 
-    
+    def process_player_action(self, active_player: Player):
+        action = ACTIONS[active_player.pick_and_stage_q_action(self.dealer.get_showing_card())]
+        player_sum, _ = active_player.hand().getSum()
+        print(active_player.getName(), action, player_sum)
+        
+        # loop
+        while action != 'stay':
+            # if action is hit
+            if action == 'hit':
+                active_player.hit(self.deck.next())
+                player_sum, _ = active_player.hand().getSum()
+
+            # todo: if action is double
+            if action == 'double':
+                active_player.hit(self.deck.next())
+                player_sum, _ = active_player.hand().getSum()
+                action = 'stay'
+                continue
+
+            # todo: if action is split, make temp second hand for player
+            if action == 'split':
+                # interpreting 'splitting' as staying for now, skip
+                action = 'stay'
+                continue
+
+            # if i bust, call it out and stop
+            if player_sum > 21:
+                # bust, call it bad
+                active_player.last_action_bad()
+                print (active_player.getName(), action, player_sum, active_player.hand())
+                # busted!
+                print(active_player.getName(), 'BUST!')
+                break
+
+        action = ACTIONS[active_player.pick_and_stage_q_action(self.dealer.get_showing_card())]
+        print (active_player.getName(), action, player_sum, active_player.hand())
+        return player_sum
+
+
+    def process_dealer_action(self):
+        # do the mandatory loop for the dealer
+        # dealer must hit on soft 17, pushes on 22
+        dealer_sum, dealer_sum_is_hard = self.dealer.hand().getSum()
+        print (self.dealer.getName(), dealer_sum, self.dealer.hand())
+        # # todo, fix this logic
+        while ((dealer_sum < 16 and dealer_sum_is_hard) or (dealer_sum < 17 and not dealer_sum_is_hard)):
+            self.dealer.hit(self.dealer.next())
+            dealer_sum, dealer_sum_is_hard = self.dealer.hand().getSum()
+            print (self.dealer.getName(), dealer_sum, self.dealer.hand())
+        return dealer_sum
+
+    def process_player_result(self, dealer_sum, active_player: Player):
+        if dealer_sum > 22:
+            # dealer loses, everyone wins
+            print('dealer lost hand, everyone wins')
+            pass
+        elif dealer_sum == 22:
+            # everyone push
+            print('everyone pushes')
+            pass
+        else:
+            player_sum, _ = active_player.hand().getSum()
+            # determine individual win or not
+            if player_sum > 21:
+                print(active_player.getName(), 'busted')
+                active_player.last_action_bad()
+            elif dealer_sum > player_sum:
+                print(self.dealer.getName(), 'beats', active_player.getName())
+                active_player.last_action_bad()
+            elif player_sum > dealer_sum:
+                if active_player.hand().isBlackJack():
+                    print(active_player.getName(), 'got blackjack')
+                    active_player.last_action_good()
+                else:
+                    print(active_player.getName(), 'beats', self.dealer.getName())
+                    active_player.last_action_good()
+            else:
+                print(active_player.getName(), 'pushes individually')        
+
+    ## main round robin function
+    def complete_a_round(self):
+        # state machine
+            # inactive_waiting - no round happening, receiving bets
+            # active_deal - bets locked in, players have been dealt
+        self.round_status = TableRoundStates['ACTIVE_DEAL']
+        self.deal()
+        self.print_table_state()
+
+        # todo: check for ace or 10, if ace, ask for insurance and if 10 early check for blackjack
+
+        for p in self.players:
+            self.process_player_action(p)
+        dealer_sum = self.process_dealer_action()
+
+        for p in self.players:
+            self.process_player_result(dealer_sum, p)
+
+        self.round_status = TableRoundStates['INACTIVE_WAITING']
+
+
+    def add_player(self, new_player: Player):
+        if (self.round_status == TableRoundStates['INACTIVE_WAITING']):
+            self.players.append(new_player)
+        else:
+            print('unable to add player ', p, ', gameplay has started')
+
+def test_table_population():
+    t = Table()
+    p1 = Player('p1', 1000)
+    p2 = Player('p2', 1000)
+    t.add_player(p1)
+    t.add_player(p2)
+
+    t.print_table_state()
 
 
 def test_tableSetup():
@@ -378,8 +526,6 @@ def test_table_round():
     # free bet or other conditions apply for side bets, etc)
 
     # this round must iterate per hand, per player on table
-
-
 
     # cache for now, remove later
     ##
@@ -488,6 +634,7 @@ def test_table_round():
     ##
 
     print(json.dumps(p1.get_q_states(), indent=3))
+    print('q states:', len(p1.get_q_states().keys()))
 
 
 # set of all possible states, with all possible choices at each one and values for each
@@ -501,4 +648,14 @@ if __name__ == '__main__':
     # test_isBlackjack()
     # test_player_q_action()
     # test_view_player_q_action_states()
-    test_table_round()
+    # test_table_population()
+
+
+    # test_table_round()
+
+    table = Table()
+    p1 = Player('p1', 1000)
+    p2 = Player('p2', 1000)
+    table.add_player(p1)
+    table.add_player(p2)
+    table.complete_a_round()
