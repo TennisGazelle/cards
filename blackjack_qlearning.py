@@ -6,8 +6,18 @@ from random import randint
 import random
 from typing import List, Tuple
 
+import matplotlib.pyplot as plt
+import numpy as np
+
+
 NUM_DECKS = 6
 SUITS = ['spades', 'hearts', 'clubs', 'diamonds']
+SUIT_EMOJIS = {
+    'spades': '♠️',
+    'hearts': '❤️',
+    'clubs': '♣️',
+    'diamonds': '♦️'
+}
 VALUES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10] # last three are JQK
 
 # there are a few things any player can do
@@ -16,16 +26,17 @@ VALUES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10] # last three are JQK
     # 2 split (if applicable)
     # 3 double (if applicable)
 ACTIONS = ['hit', 'stay', 'split', 'double']
+DEFAULT_VECTOR = [100, 100, 100, 100]
 
-GOOD_REWARD_VALUE=1
+GOOD_REWARD_VALUE=2
 BAD_REWARD_VALUE=5
 
 INCLUDE_DEALER_IN_Q_STATE=True
-
-DEFAULT_VECTOR = [10, 10, 10, 10]
+INCLUDE_SUIT_IN_CARD_VALUE=False
+NUM_TRAINING_ITERATIONS=10000
 
 PLAYER_NAME_CHOICES = ['daniel', 'honi', 'sierra', 'oliver', 'alex', 'kathir', 'ben']
-DEALER_NAME_CHOICES = ['Dealer-Pable', 'Dealer-Liz', 'Dealer-Mina']
+DEALER_NAME_CHOICES = ['Dealer-Pable', 'Dealer-Liz', 'Dealer-Mina', 'Dealer-Jon']
 
 TableRoundStates = {
     'INACTIVE_WAITING': 'inactive_waiting',
@@ -41,7 +52,7 @@ class Card:
     
     def __str__(self) -> str:
         # return f'{self.value} of {self.suit}'
-        return f'{self.value}'
+        return f'{self.value}' + (SUIT_EMOJIS[self.suit] if INCLUDE_SUIT_IN_CARD_VALUE else '')
 
 class Hand:
     def __init__(self, cards: List[Card]) -> None:
@@ -145,9 +156,9 @@ def test_isBlackjack():
     assert(h.isBlackJack())
 
 class Deck:
-    def __init__(self) -> None:
+    def __init__(self, num_decks=NUM_DECKS) -> None:
         deck = []
-        for _ in range(NUM_DECKS):
+        for _ in range(num_decks):
             for s in SUITS:
                 for v in VALUES:
                     c = Card(s, v)
@@ -155,28 +166,63 @@ class Deck:
         self.deck = deck
         self.index = 0
     
+    def len(self):
+        return len(self.deck)
+    
     def shuffle(self) -> None:
         size = len(self.deck)
         # new_indexes = range(size)
         for thisIndex in range(size):
             otherIndex = randint(thisIndex, size-1)
-
+            # swap this and other
             buffer = self.deck[thisIndex]
             self.deck[thisIndex] = self.deck[otherIndex]
             self.deck[otherIndex] = buffer
     
     def fan(self):
+        line = ''
         for c in self.deck:
-            print(c)
+            line += f'{c} '
+        print(line)
     
+    # as opposed to the deck iterator's __next_ function,
+    # this will shuffle the deck if it needs to wrap around the deck
     def next(self):
         c = self.deck[self.index]
         self.index = (self.index + 1) % len(self.deck)
+        if self.index == 0:
+            self.shuffle()
         return c
+
+    # def __next__(self):
+    #     c = self.deck[self._index]
+    #     if self._index < len(cards):
+    #         # result = cards[self._index]
+    #         self._index += 1;
+    #         return c
+    #     return StopIteration
 
     def reset(self):
         self.index = 0
         self.shuffle()
+    
+    # def cards(self) -> List:
+    #     return self.cards
+
+    def __iter__(self):
+        return DeckIterator(self)
+
+class DeckIterator:
+    def __init__(self, deck: Deck) -> None:
+        self.deck = deck
+        self._index = 0
+    
+    def __next__(self):
+        if self._index < len(self.deck.deck):
+            result = self.deck.deck[self._index]
+            self._index += 1;
+            return result
+        raise StopIteration
 
 def test_shuffleDeck():
     d = Deck()
@@ -344,6 +390,7 @@ class Player:
 
         return self.last_state_action_index
     
+    ## todo: fix this in case values go negative
     def last_action_good(self):
         self.score['wins'] += 1
         self.hands_seen += 1
@@ -354,13 +401,14 @@ class Player:
             self.states[key][self.last_states[key]] += GOOD_REWARD_VALUE
         self.flush_last_states()
 
+    ## todo: fix this in case values go negative
     def last_action_bad(self):
         self.score['losses'] += 1
         # go through the other keys, and add that vector to the q vector
         for key in self.last_states.keys():
             # if key not in self.states.keys():
             #     self.states[key] = [0, 0, 0, 0]
-            self.states[key][self.last_states[key]] -= BAD_REWARD_VALUE
+            self.states[key][self.last_states[key]] = max(0, self.states[key][self.last_states[key]] - BAD_REWARD_VALUE)
         self.flush_last_states()
 
     def last_action_neutral(self):
@@ -368,6 +416,10 @@ class Player:
 
     def flush_last_states(self):
         self.last_states.clear()
+
+    def ask_for_insurance(self):
+        # todo: decide whether or not to give insurance based on hand
+        return 0
         
 def test_player_q_action():
     p1 = Player('danny', 1000)
@@ -515,7 +567,24 @@ class Table:
         self.deal()
         # self.print_table_state()
 
-        # todo: check for ace or 10, if ace, ask for insurance and if 10 early check for blackjack
+        if self.dealer.get_showing_card().value == 10:
+            if self.dealer.hand().isBlackJack():
+                # everyone loses, game done
+                print('dealer got blackjack, all lose, restart')
+                self.round_status = TableRoundStates['INACTIVE_WAITING']
+                return
+        
+        if self.dealer.get_showing_card().value == 1:
+            # ask for insurance from players
+            for p in self.players:
+                insurance = p.ask_for_insurance()
+            if self.dealer.hand().isBlackJack:
+                # everyone loses, game done
+                print('dealer got blackjack, all lose, restart')
+                self.round_status = TableRoundStates['INACTIVE_WAITING']
+                return
+
+
 
         for p in self.players:
             self.process_player_action(p)
@@ -531,7 +600,7 @@ class Table:
         if (self.round_status == TableRoundStates['INACTIVE_WAITING']):
             self.players.append(new_player)
         else:
-            print('unable to add player ', p, ', gameplay has started')
+            print('unable to add player ', new_player, ', gameplay has started')
 
 def test_table_population():
     t = Table()
@@ -680,34 +749,20 @@ def test_table_round():
     print(json.dumps(p1.get_q_states(), indent=3))
     print('q states:', len(p1.get_q_states().keys()))
 
-
-# set of all possible states, with all possible choices at each one and values for each
-
-if __name__ == '__main__':
-    # test_getSum()
-    # test_shuffleDeck()
-    # test_prepDeck()
-    # test_sortHand()
-    # test_tableSetup()
-    # test_isBlackjack()
-    # test_player_q_action()
-    # test_view_player_q_action_states()
-    # test_table_population()
-
-
-    # test_table_round()
-
+def test_iterate_table_and_graph():
     table = Table()
-    p1 = Player('test_danny', 20000)
+    p1 = Player('test_danny', 1000)
     p1.load_states_from_file()
     table.add_player(p1)
 
     wins, losses, win_rate, q_state_size = [], [], [], []
     starting_index = p1.get_metadata()['hands_seen']
-    for i in range(1, 20000):
+    for i in range(1, NUM_TRAINING_ITERATIONS):
         table.complete_a_round()
         
         metadata = p1.get_metadata()
+
+        # populate tables
         wins.append(metadata['score']['wins'])
         losses.append(metadata['score']['losses'])
         win_rate.append(float(metadata['score']['wins']) / float(starting_index + i))
@@ -716,8 +771,9 @@ if __name__ == '__main__':
         # print(wins, losses, q_state_size, metadata)
 
     p1.save_states()
-    import matplotlib.pyplot as plt
-    import numpy as np
+    # standardize this and move to the top later
+    # import matplotlib.pyplot as plt
+    # import numpy as np
 
     # Some example data to display
     x = np.array(range(starting_index, starting_index + len(wins)))
@@ -734,10 +790,48 @@ if __name__ == '__main__':
     # print(y_losses)
     # print(y_size)
 
-    fig, axs = plt.subplots(4)
-    fig.suptitle('wins, losses, unique q states')
+    fig, axs = plt.subplots(3)
+    fig.suptitle('wins v losses, win ratio, unique q states')
     axs[0].plot(x, y_wins)
-    axs[1].plot(x, y_losses)
-    axs[2].plot(x, y_rate)
-    axs[3].plot(x, y_size)
+    axs[0].plot(x, y_losses)
+    # axs[1].plot(x, y_losses)
+    axs[1].plot(x, y_rate)
+    axs[2].plot(x, y_size)
     plt.show()
+
+
+def test_generate_all_q_states():
+    # these are only q starting states
+    deck = Deck(1)
+    deck2 = Deck(1)
+    dealerDeck = Deck(1)
+    # deck.shuffle()
+    unique_states = set()
+    for card1 in deck:
+        for card2 in deck2:
+            for dealerCard in dealerDeck:
+                if card1.value <= card2.value:
+                    unique_states.add(f'{dealerCard}-[[\'{card1}\', \'{card2}\']]')
+    print(len(unique_states))
+
+    return (list(unique_states))
+
+
+# set of all possible states, with all possible choices at each one and values for each
+
+if __name__ == '__main__':
+    # test_getSum()
+    # test_shuffleDeck()
+    # test_prepDeck()
+    # test_sortHand()
+    # test_tableSetup()
+    # test_isBlackjack()
+    # test_player_q_action()
+    # test_view_player_q_action_states()
+    # test_table_population()
+
+
+    # test_table_round()
+    test_iterate_table_and_graph()
+
+    # test_generate_all_q_states()
