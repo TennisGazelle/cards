@@ -2,7 +2,7 @@ import json
 
 from src.Card import Card
 from src.Deck import Deck
-from src.Player import Player
+from src.Player import Player, BaseDecisionEngine, QDecisionEngine
 
 def test_player_q_action():
     p1 = Player('danny', 1000)
@@ -24,3 +24,12 @@ def test_view_player_q_action_states():
         p1.last_action_good()
 
     print(json.dumps(p1.get_q_states(), indent=3))
+
+def test_player_init():
+    de = QDecisionEngine()
+    print(de)
+
+
+if __name__ == '__main__':
+    # test_player_q_action()
+    test_player_init()

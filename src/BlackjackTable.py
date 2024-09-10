@@ -4,7 +4,7 @@ from src.constants import *
 from src.Deck import Deck
 from src.Player import Player
 
-class Table:
+class BlackjackTable:
     def __init__(self, num_players: int = 0) -> None:
         self.dealer = Player.generate_dealer()
         self.players = Player.generate_players(num_players)
@@ -20,15 +20,14 @@ class Table:
 
     def print_table_state(self):
         print(
-            f'Dealer:',
-            'not yet dealt' if not self.dealer.hand() else f'{self.dealer.hand()}',
-            0 if self.dealer.hand() == None else self.dealer.hand().getSum()
+            'Table:\n'
+            '\tDealer:',
+            'not yet dealt' if not self.dealer.get_hand() else f'{self.dealer.get_hand()}',
         )
         for p in self.players:
             print(
-                f'Player {p.getName()}:',
-                None if not p.hand() else p.hand(),
-                0 if p.hand() == None else p.hand().getSum())
+                f'\tPlayer {p}'
+            )
 
     # start a round
     def deal(self):
@@ -40,23 +39,22 @@ class Table:
             p.set_bet()
             p.be_dealt(self.deck.next(), self.deck.next())
 
-    def process_player_action(self, active_player: Player):
+    def process_player_preaction(self, active_player: Player):
         action = ACTIONS[active_player.pick_and_stage_q_action(self.dealer.get_showing_card())]
-        player_sum, _ = active_player.hand().getSum()
-        # print(active_player.getName(), action, player_sum)
-        self.logger.info(f"table: {active_player.getName()}, ({player_sum}), chooses to {action}")
+        player_sum, _ = active_player.get_hand().sum()
+        self.logger.info(f"table: {active_player.get_name()}, ({player_sum}), chooses to {action}")
 
         # loop
         while action != 'stay':
             # if action is hit
             if action == 'hit':
                 active_player.hit(self.deck.next())
-                player_sum, _ = active_player.hand().getSum()
+                player_sum, _ = active_player.get_hand().sum()
 
             # todo: if action is double
             if action == 'double':
                 active_player.hit(self.deck.next())
-                player_sum, _ = active_player.hand().getSum()
+                player_sum, _ = active_player.get_hand().sum()
                 action = 'stay'
                 continue
 
@@ -69,54 +67,58 @@ class Table:
             # if i bust, call it out and stop
             if player_sum > 21:
                 # bust, call it bad
-                self.logger.info(f"{active_player.getName()} {action} {player_sum} {active_player.hand()}")
+                self.logger.info(f"{active_player.get_name()} {action} {player_sum} {active_player.get_hand()}")
                 # busted!
-                self.logger.info(f"{active_player.getName()} 'BUST!'")
+                self.logger.info(f"{active_player.get_name()} 'BUST!'")
                 break
 
         action = ACTIONS[active_player.pick_and_stage_q_action(self.dealer.get_showing_card())]
-        self.logger.info(f"{active_player.getName()} {action} {player_sum} {active_player.hand()}")
+        self.logger.info(f"{active_player.get_name()} {action} {player_sum} {active_player.get_hand()}")
         return player_sum
 
     def process_dealer_action(self):
-        # do the mandatory loop for the dealer
-        # dealer must hit on soft 17, pushes on 22
-        dealer_sum, dealer_sum_is_hard = self.dealer.hand().getSum()
-        self.logger.info(f"{self.dealer.getName()} {dealer_sum} {self.dealer.hand()}")
-        # # todo, fix this logic
-        while ((dealer_sum < 16 and dealer_sum_is_hard) or (dealer_sum < 17 and not dealer_sum_is_hard)):
-            self.dealer.hit(self.deck.next())
-            dealer_sum, dealer_sum_is_hard = self.dealer.hand().getSum()
-            self.logger.info(f"{self.dealer.getName()} {dealer_sum} {self.dealer.hand()}")
-        return dealer_sum
+        dealer_sum, dealer_sum_is_hard = self.dealer.get_hand().sum()
+        self.logger.info(f"{self.dealer.get_name()} {dealer_sum} {self.dealer.get_hand()}")
 
-    def process_player_result(self, dealer_sum, active_player: Player):
+        # dealer must hit on soft 17, pushes on 22
+        while (dealer_sum <= 16 and dealer_sum_is_hard) or (dealer_sum <= 17 and not dealer_sum_is_hard):
+            self.dealer.hit(self.deck.next())
+            dealer_sum, dealer_sum_is_hard = self.dealer.get_hand().sum()
+            self.logger.info(f"{self.dealer.get_name()} {dealer_sum} {self.dealer.get_hand()}")
+
         if dealer_sum > 22:
             # dealer loses, everyone wins
             self.logger.info('dealer lost hand, everyone wins')
-            pass
+            self.logger.info(f"{self.dealer.get_name()} lost; everyone wins; {dealer_sum} {self.dealer.get_hand()}")
+
         elif dealer_sum == 22:
             # everyone push
             self.logger.info('everyone pushes')
-            pass
+            self.logger.info(f"{self.dealer.get_name()} {dealer_sum}; everyone push {self.dealer.get_hand()}")
+
+        return dealer_sum
+
+    def process_player_result(self, dealer_sum, active_player: Player):
+        if dealer_sum >= 22:
+            active_player.last_action_neutral()
         else:
-            player_sum, _ = active_player.hand().getSum()
+            player_sum, _ = active_player.get_hand().sum()
             # determine individual win or not
             if player_sum > 21:
-                print(active_player.getName(), 'busted')
+                self.logger.info(f'{active_player.get_name()} busted')
                 active_player.last_action_bad()
             elif dealer_sum > player_sum:
-                print(self.dealer.getName(), 'beats', active_player.getName())
+                self.logger.info(f'{self.dealer.get_name()} beats {active_player.get_name()}')
                 active_player.last_action_bad()
             elif player_sum > dealer_sum:
-                if active_player.hand().isBlackJack():
-                    print(active_player.getName(), 'got blackjack')
+                if active_player.get_hand().is_blackjack():
+                    self.logger.info(f'{active_player.get_name()} got blackjack')
                     active_player.last_action_good()
                 else:
-                    print(active_player.getName(), 'beats', self.dealer.getName())
+                    self.logger.info(f'{active_player.get_name()} beats {self.dealer.get_name()}')
                     active_player.last_action_good()
             else:
-                print(active_player.getName(), 'pushes individually')
+                self.logger.info(f'{active_player.get_name()} pushes individually')
                 active_player.last_action_neutral()
 
         # active_player.save_states()
@@ -131,19 +133,18 @@ class Table:
         self.deal()
         # self.print_table_state()
 
-        ## check if dealer has blackjack
+        ## check if dealer has blackjack (showing a 10 or a A)
         if self.dealer.get_showing_card().value == 10:
-            if self.dealer.hand().isBlackJack():
+            if self.dealer.get_hand().is_blackjack():
                 # everyone loses, game done
                 print('dealer got blackjack, all lose, restart')
                 self.round_status = TableRoundStates['INACTIVE_WAITING']
                 return
-
         if self.dealer.get_showing_card().value == 1:
             # ask for insurance from players
             for p in self.players:
                 insurance = p.ask_for_insurance()
-            if self.dealer.hand().isBlackJack:
+            if self.dealer.get_hand().is_blackjack:
                 # everyone loses, game done
                 print('dealer got blackjack, all lose, restart')
                 self.round_status = TableRoundStates['INACTIVE_WAITING']
@@ -153,7 +154,7 @@ class Table:
         # then dealer does his action
         # then resolve all players
         for p in self.players:
-            self.process_player_action(p)
+            self.process_player_preaction(p)
         dealer_sum = self.process_dealer_action()
         for p in self.players:
             self.process_player_result(dealer_sum, p)

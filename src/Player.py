@@ -7,15 +7,74 @@ from src.constants import *
 from src.Card import Card
 from src.Hand import Hand
 
+class BaseDecisionEngine:
+    def __init__(self):
+        self.str_name = ''
+
+    def __str__(self):
+        return self.str_name
+    pass
+
+class QDecisionEngine(BaseDecisionEngine):
+    def __init__(self):
+        # for parent class reasons
+        super().__init__()
+        self.str_name = 'Qstate'
+
+        self.last_states = {}
+        self.last_state_key = ''
+        self.last_state_action_index = 0
+
+class NNDecisionEngine(BaseDecisionEngine):
+    def __init__(self):
+        super().__init__()
+        self.str_name = 'NeuralNet'
+
+
+class BasePlayer:
+    def __init__(self, name: str, initial_chip_count: int, is_dealer: bool = False):
+        self.name = name
+        self.chips = initial_chip_count
+        self.pending_chips = 0
+        self.is_dealer = is_dealer
+
+        self.hand = None
+
+        self.score = {
+            'wins': 0,
+            'losses': 0,
+            'draws': 0
+        }
+        self.hands_seen = 0
+        self.logger = logging.getLogger(__name__)
+
+        self.decision_engine = None
+
+    def __str__(self) -> str:
+        return f'{self.name}-${self.chips}-{self.hand}'
+
+    def hand(self) -> Hand:
+        return self.hand
+
+    def get_name(self):
+        return self.name
+
+class QPlayer(BasePlayer):
+    def __init__(self, name, initial_chip_count):
+        super(QPlayer, self).__init__(name, initial_chip_count, is_dealer=False)
+
+class Dealer(BasePlayer):
+    def __init__(self, name):
+        super(Dealer, self).__init__(name, 0, is_dealer=True)
 
 class Player:
     def __init__(self, name: str, chips: int, is_dealer: bool = False) -> None:
         self.playerName = name
         self.chips = chips or 1000000  # inf money for dealer
-        self._hand = None
-        self.states = {}
+        self.hand = None
         self.is_dealer = is_dealer
 
+        self.states = {}
         self.last_states = {}
 
         self.last_state_key = ''
@@ -23,23 +82,24 @@ class Player:
 
         self.score = {
             'wins': 0,
-            'losses': 0
+            'losses': 0,
+            'draws': 0
         }
         self.hands_seen = 0
         self.pending_chips = 0
         self.logger = logging.getLogger(__name__)
 
     def __str__(self) -> str:
-        return f'{self.playerName}-${self.chips}-{self._hand}'
+        return f'{self.playerName}-{self.chips}-{self.hand}'
 
-    def hand(self) -> Hand:
-        return self._hand
+    def get_hand(self) -> Hand:
+        return self.hand
 
-    def getName(self):
+    def get_name(self):
         return self.playerName
 
     def as_filename(self):
-        return f'../player_data/{self.getName()}.json'
+        return f'../player_data/{self.get_name()}.json'
 
     def get_metadata(self) -> dict:
         return {
@@ -68,19 +128,19 @@ class Player:
         self.logger.info('PLAYER: saved to ' + player_file.name)
 
     def be_dealt(self, c1: Card, c2: Card):
-        self._hand = Hand([c1, c2])
+        self.hand = Hand([c1, c2])
         self.last_states.clear()
         self.hands_seen += 1
 
     def set_bet(self):
-        # todo, make this variable based on superstition from what they've seen
+        # todo, make this variable based on 'superstition' from what they've seen
         bet_value = 1
         self.chips -= bet_value
         self.pending_chips += bet_value
         return bet_value
 
     def hit(self, c):
-        self._hand.add_card(c)
+        self.hand.add_card(c)
 
     def get_q_states(self):
         return self.states
@@ -102,8 +162,8 @@ class Player:
         return Player(name, chips, True)
 
     def get_showing_card(self) -> Card or None:
-        if self._hand:
-            return self._hand.get(0)
+        if self.hand:
+            return self.hand.get(0)
         else:
             return None
 
@@ -111,7 +171,7 @@ class Player:
         # sum, is_hard = self._hand.getSum()
         # key = str(sum) + '-hard' if is_hard else '-soft'
 
-        key = str(self._hand.sort())
+        key = str(self.hand.sort())
         if INCLUDE_DEALER_IN_Q_STATE:
             key = str(dealerCard) + '-' + key
         return key
@@ -122,7 +182,6 @@ class Player:
         # 1 stay
         # 2 split (if applicable)
         # 3 double (if applicable)
-        # 4 lost
         # represented by 4 float probability vector N within (0,1)^4
         # they will be kept as Q-states in an array with probability vectors for each of them
         # the 'action' will be the one that was made, small cache of sequences are kept in memory
@@ -132,7 +191,7 @@ class Player:
         key = self.generate_state_key(dealerCard)
         if key not in self.states.keys():
             # if it's a valid state (i.e. not yet busted)
-            player_sum, _ = self._hand.getSum()
+            player_sum, _ = self.hand.sum()
             if player_sum > 21:
                 self.last_state_action_index = 1
                 return 1  # stay
@@ -140,7 +199,7 @@ class Player:
             self.states[key] = DEFAULT_VECTOR
 
         # blackjacks are automatic stays
-        if self._hand.isBlackJack():
+        if self.hand.is_blackjack():
             return 1  # stay
 
         # shallow copy to keep track of updates
@@ -149,13 +208,13 @@ class Player:
         self.last_state_key = key
 
         # if i can split, consider index 2 in propability vector
-        if self._hand.size() == 2 and self._hand.get(0).value == self._hand.get(1).value:
+        if self.hand.size() == 2 and self.hand.get(0).value == self.hand.get(1).value:
             pass
         else:
             tokenVector[2] = 0
 
         # if i can double, consider index 3 in probability vector
-        if self._hand.size() == 2:
+        if self.hand.size() == 2:
             pass
         else:
             tokenVector[3] = 0
@@ -182,6 +241,7 @@ class Player:
 
         self.score['wins'] += 1
         self.hands_seen += 1
+
         # go through the other keys, and add that vector to the q vector
         for key in self.last_states.keys():
             # if key not in self.states.keys():
@@ -194,6 +254,8 @@ class Player:
         self.pending_chips = 0
 
         self.score['losses'] += 1
+        self.hands_seen += 1
+
         # go through the other keys, and add that vector to the q vector
         for key in self.last_states.keys():
             # if key not in self.states.keys():
@@ -204,6 +266,8 @@ class Player:
     def last_action_neutral(self):
         self.chips += self.pending_chips
         self.pending_chips = 0
+
+        self.hands_seen += 1
 
         self.flush_last_states()
 

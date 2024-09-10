@@ -16,15 +16,15 @@ VALUES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10] # last three are JQK
 ACTIONS = ['hit', 'stay', 'split', 'double']
 DEFAULT_VECTOR = [100, 100, 100, 100]
 
-GOOD_REWARD_VALUE=85
-BAD_REWARD_VALUE=50
+GOOD_REWARD_VALUE=9
+BAD_REWARD_VALUE=3
 
 INCLUDE_DEALER_IN_Q_STATE=True
 INCLUDE_SUIT_IN_CARD_VALUE=False
 NUM_TRAINING_ITERATIONS=1000
 
 PLAYER_NAME_CHOICES = ['daniel', 'honi', 'sierra', 'oliver', 'alex', 'kathir', 'ben']
-DEALER_NAME_CHOICES = ['Dealer-Pable', 'Dealer-Liz', 'Dealer-Mina', 'Dealer-Jon']
+DEALER_NAME_CHOICES = ['Dealer-Pablo', 'Dealer-Liz', 'Dealer-Mina', 'Dealer-Jon']
 
 TableRoundStates = {
     'INACTIVE_WAITING': 'inactive_waiting',

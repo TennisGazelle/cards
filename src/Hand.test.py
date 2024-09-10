@@ -7,7 +7,7 @@ def test_getSum():
     c3 = Card('spades', 6)
     h = Hand([c1, c2, c3])
 
-    sum, isHard = h.getSum()
+    sum, isHard = h.sum()
     print(h, 'sum:', sum, 'hard' if isHard else 'soft')
     assert(sum == 18)
     assert(isHard == False)
@@ -18,7 +18,7 @@ def test_getSum():
     c4 = Card('clubs', 1)
     h = Hand([c1, c2, c3, c4])
 
-    sum, isHard = h.getSum()
+    sum, isHard = h.sum()
     print(h, 'sum:', sum, 'hard' if isHard else 'soft')
     assert(sum == 13)
     assert(isHard == True)
@@ -36,5 +36,5 @@ def test_isBlackjack():
     c2 = Card('spades', 10)
     h = Hand([c1, c2])
     print(h)
-    print(h.isBlackJack())
-    assert(h.isBlackJack())
+    print(h.is_blackjack())
+    assert(h.is_blackjack())

@@ -13,14 +13,14 @@ class Hand:
     def size(self) -> int:
         return len(self.cards)
 
-    def get(self, index) -> int:
+    def get(self, index) -> Card:
         assert index < len(self.cards)
         return self.cards[index]
 
     def add_card(self, c: Card):
         self.cards.append(c)
 
-    def getSum(self) -> Tuple[int, bool]:
+    def sum(self) -> Tuple[int, bool]:
         if not self.cards or len(self.cards) == 0:
             return 0
 
@@ -57,11 +57,11 @@ class Hand:
 
         return sum, isHard
 
-    def sort(self) -> List[Card]:
-        sortedCards = copy.deepcopy(self.cards)
-        sortedCards.sort(key=lambda c: c.value)
-        return Hand(sortedCards)
+    def sort(self):
+        sorted_cards = copy.deepcopy(self.cards)
+        sorted_cards.sort(key=lambda c: c.value)
+        return Hand(sorted_cards)
 
-    def isBlackJack(self) -> bool:
+    def is_blackjack(self) -> bool:
         h = self.sort()
         return len(self.cards) == 2 and h.get(0).value == 1 and h.get(1).value == 10
