@@ -24,7 +24,7 @@ class Hand:
         if not self.cards or len(self.cards) == 0:
             return 0
 
-        sum = 0
+        total = 0
         isHard = True
         containsAtLeastOneAce = False
         for x in self.cards:
@@ -35,27 +35,27 @@ class Hand:
                     # there can only be at most one ace that's hard
                     # the first one seen (if previously) could still be reduced if we overflow, if we can (i.e. if notisHard)
                     # we can only ever add one, but if needed, we should reduce the first one
-                    sum += 1
-                    if sum > 21 and not isHard:
-                        sum -= 10  # remove the first ace, make it a 1
+                    total += 1
+                    if total > 21 and not isHard:
+                        total -= 10  # remove the first ace, make it a 1
                         isHard = True
 
                 else:
                     # this is the first (or only) ace we see, check for 11 compatibility
                     containsAtLeastOneAce = True
-                    if sum + 11 < 21:
+                    if total + 11 < 21:
                         isHard = False
-                        sum += 11
+                        total += 11
                     else:
                         isHard = True  # this one is technically redundant
-                        sum += 1
+                        total += 1
             else:
-                sum += x.value
-                if containsAtLeastOneAce and sum > 21 and not isHard:
-                    sum -= 10  # remove the first ace, make it a 1
+                total += x.value
+                if containsAtLeastOneAce and total > 21 and not isHard:
+                    total -= 10  # remove the first ace, make it a 1
                     isHard = True
 
-        return sum, isHard
+        return total, isHard
 
     def sort(self):
         sorted_cards = copy.deepcopy(self.cards)

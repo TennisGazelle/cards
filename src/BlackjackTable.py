@@ -4,13 +4,20 @@ from src.constants import *
 from src.Deck import Deck
 from src.Player import Player
 
-class BlackjackTable:
+class Table:
+    def __init__(self):
+        self.deck = Deck()
+
+    def print_table_state(self):
+        pass
+
+class BlackjackTable(Table):
     def __init__(self, num_players: int = 0) -> None:
+        super().__init__()
         self.dealer = Player.generate_dealer()
         self.players = Player.generate_players(num_players)
         self.rounds = []
         self.current_round = {}
-        self.deck = Deck()
 
         # state machine
         # inactive_waiting - no round happening, receiving bets
@@ -34,7 +41,11 @@ class BlackjackTable:
         self.deck.reset()
         self.deck.shuffle()
 
+        # two for the dealer
         self.dealer.be_dealt(self.deck.next(), self.deck.next())
+
+        # make your players bet
+        # two for each player
         for p in self.players:
             p.set_bet()
             p.be_dealt(self.deck.next(), self.deck.next())
@@ -162,7 +173,7 @@ class BlackjackTable:
         self.round_status = TableRoundStates['INACTIVE_WAITING']
 
     def add_player(self, new_player: Player):
-        if (self.round_status == TableRoundStates['INACTIVE_WAITING']):
+        if self.round_status == TableRoundStates['INACTIVE_WAITING']:
             self.players.append(new_player)
         else:
             print('unable to add player ', new_player, ', gameplay has started')
